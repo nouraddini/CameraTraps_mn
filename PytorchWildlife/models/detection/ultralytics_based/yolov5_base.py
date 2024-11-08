@@ -7,24 +7,26 @@
 
 import numpy as np
 from tqdm import tqdm
+from PIL import Image
 import supervision as sv
+
 import torch
+from torch.utils.data import DataLoader
 from torch.hub import load_state_dict_from_url
+
 from yolov5.utils.general import non_max_suppression, scale_coords
 
-class YOLOV5Base:
+from ..base_detector import BaseDetector
+from ....data import transforms as pw_trans
+from ....data import datasets as pw_data
+
+
+class YOLOV5Base(BaseDetector):
     """
     Base detector class for YOLO V5. This class provides utility methods for
     loading the model, generating results, and performing single and batch image detections.
     """
-    
-    # Placeholder class-level attributes to be defined in derived classes
-    IMAGE_SIZE = None
-    STRIDE = None
-    CLASS_NAMES = None
-    TRANSFORM = None
-
-    def __init__(self, weights=None, device="cpu", url=None):
+    def __init__(self, weights=None, device="cpu", url=None, transform=None):
         """
         Initialize the YOLO V5 detector.
         
@@ -35,11 +37,12 @@ class YOLOV5Base:
                 Device for model inference. Defaults to "cpu".
             url (str, optional): 
                 URL to fetch the model weights. Defaults to None.
+            transform (callable, optional):
+                Optional transform to be applied on the image. Defaults to None.
         """
-        self.model = None
-        self.device = device
-        self._load_model(weights, self.device, url)
-        self.model.to(self.device)
+        self.transform = transform
+        super(YOLOV5Base, self).__init__(weights=weights, device=device, url=url)
+        self._load_model(weights, device, url)
 
     def _load_model(self, weights=None, device="cpu", url=None):
         """
@@ -61,7 +64,11 @@ class YOLOV5Base:
             checkpoint = load_state_dict_from_url(url, map_location=torch.device(self.device))
         else:
             raise Exception("Need weights for inference.")
-        self.model = checkpoint["model"].float().fuse().eval()  # Convert to FP32 model
+        self.model = checkpoint["model"].float().fuse().eval().to(self.device)
+        
+        if not self.transform:
+            self.transform = pw_trans.MegaDetector_v5_Transform(target_size=self.IMAGE_SIZE,
+                                                                stride=self.STRIDE)
 
     def results_generation(self, preds, img_id, id_strip=None):
         """
@@ -90,16 +97,14 @@ class YOLOV5Base:
         ]
         return results
 
-    def single_image_detection(self, img, img_size=None, img_path=None, conf_thres=0.2, id_strip=None):
+    def single_image_detection(self, img, img_path=None, conf_thres=0.2, id_strip=None):
         """
         Perform detection on a single image.
         
         Args:
-            img (torch.Tensor): 
-                Input image tensor.
-            img_size (tuple): 
-                Original image size.
-            img_path (str): 
+            img (str or ndarray): 
+                Image path or ndarray of images.
+            img_path (str, optional): 
                 Image path or identifier.
             conf_thres (float, optional): 
                 Confidence threshold for predictions. Defaults to 0.2.
@@ -109,6 +114,13 @@ class YOLOV5Base:
         Returns:
             dict: Detection results.
         """
+        if type(img) == str:
+            if img_path is None:
+                img_path = img
+            img = np.array(Image.open(img_path).convert("RGB"))
+        img_size = img.shape
+        img = self.transform(img)
+
         if img_size is None:
             img_size = img.permute((1, 2, 0)).shape # We need hwc instead of chw for coord scaling
         preds = self.model(img.unsqueeze(0).to(self.device))[0]
@@ -116,24 +128,38 @@ class YOLOV5Base:
         preds[:, :4] = scale_coords([self.IMAGE_SIZE] * 2, preds[:, :4], img_size).round()
         return self.results_generation(preds.cpu().numpy(), img_path, id_strip)
 
-    def batch_image_detection(self, dataloader, conf_thres=0.2, id_strip=None):
+    def batch_image_detection(self, data_path, batch_size=16, conf_thres=0.2, id_strip=None):
         """
         Perform detection on a batch of images.
         
         Args:
-            dataloader (DataLoader): 
-                DataLoader containing image batches.
+            data_path (str): 
+                Path containing all images for inference.
+            batch_size (int, optional):
+                Batch size for inference. Defaults to 16.
             conf_thres (float, optional): 
                 Confidence threshold for predictions. Defaults to 0.2.
             id_strip (str, optional): 
                 Characters to strip from img_id. Defaults to None.
+            extension (str, optional):
+                Image extension to search for. Defaults to "JPG"
 
         Returns:
             list: List of detection results for all images.
         """
+
+        dataset = pw_data.DetectionImageFolder(
+            data_path,
+            transform=self.transform,
+        )
+
+        # Creating a DataLoader for batching and parallel processing of the images
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, 
+                            pin_memory=True, num_workers=0, drop_last=False)
+
         results = []
-        with tqdm(total=len(dataloader)) as pbar:
-            for batch_index, (imgs, paths, sizes) in enumerate(dataloader):
+        with tqdm(total=len(loader)) as pbar:
+            for batch_index, (imgs, paths, sizes) in enumerate(loader):
                 imgs = imgs.to(self.device)
                 predictions = self.model(imgs)[0].detach().cpu()
                 predictions = non_max_suppression(predictions, conf_thres=conf_thres)
