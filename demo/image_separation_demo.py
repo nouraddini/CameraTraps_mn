@@ -47,38 +47,38 @@ detection_model = pw_detection.MegaDetectorV6(device=DEVICE, pretrained=True, ve
 #%% Batch detection
 """ Batch-detection demo """
 
-# # Performing batch detection on the images
-# results = detection_model.batch_image_detection(args.image_folder, batch_size=150) # batch_size=16
+# Performing batch detection on the images
+results = detection_model.batch_image_detection(args.image_folder, batch_size=150) # batch_size=16
 
-# #%% Output to JSON results
-# # Saving the detection results in JSON format
-# os.makedirs(args.output_path, exist_ok=True)
-# json_file = os.path.join(args.output_path, "detection_results.json")
-# pw_utils.save_detection_json(results, json_file,
-#                              categories=detection_model.CLASS_NAMES,
-#                              exclude_category_ids=[], # Category IDs can be found in the definition of each model.
-#                              exclude_file_path=args.image_folder)
+#%% Output to JSON results
+# Saving the detection results in JSON format
+os.makedirs(args.output_path, exist_ok=True)
+json_file = os.path.join(args.output_path, "detection_results.json")
+pw_utils.save_detection_json(results, json_file,
+                             categories=detection_model.CLASS_NAMES,
+                             exclude_category_ids=[], # Category IDs can be found in the definition of each model.
+                             exclude_file_path=args.image_folder)
 
-# # Separate the positive and negative detections through file copying:
-# pw_utils.detection_folder_separation(json_file, args.image_folder, args.output_path, args.threshold)
+# Separate the positive and negative detections through file copying:
+pw_utils.detection_folder_separation(json_file, args.image_folder, args.output_path, args.threshold)
 
 #%% Batch detection with Profiling
 """ Batch-detection demo """
 
-# Profiling the batch detection process
-import torch.profiler
+# # Profiling the batch detection process
+# import torch.profiler
 
-with torch.profiler.profile(
-    activities=[
-        torch.profiler.ProfilerActivity.CPU,
-        torch.profiler.ProfilerActivity.CUDA,
-    ],
-    on_trace_ready=torch.profiler.tensorboard_trace_handler('./log'),
-    record_shapes=True,
-    with_stack=True
-) as prof:
-    # Perform batch detection on the images
-    results = detection_model.batch_image_detection(args.image_folder, batch_size=300) # batch_size=16 v6 = 300
+# with torch.profiler.profile(
+#     activities=[
+#         torch.profiler.ProfilerActivity.CPU,
+#         torch.profiler.ProfilerActivity.CUDA,
+#     ],
+#     on_trace_ready=torch.profiler.tensorboard_trace_handler('./log'),
+#     record_shapes=True,
+#     with_stack=True
+# ) as prof:
+#     # Perform batch detection on the images
+#     results = detection_model.batch_image_detection(args.image_folder, batch_size=150) # batch_size=16 v6 = 300
 
-# Print profiling results
-print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+# # Print profiling results
+# print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))

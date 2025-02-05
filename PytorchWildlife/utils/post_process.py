@@ -428,6 +428,7 @@ def save_detection_classification_timelapse_json(
 
 
 def detection_folder_separation(json_file, img_path, destination_path, confidence_threshold):
+    print("DEBUG: Using detection_folder_separation from post_process.py")
     """
     Processes detection data from a JSON file to sort images into 'Animal' or 'No_animal' directories
     based on detection categories and confidence levels.
@@ -503,6 +504,8 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
         # (1) Construct the destination file path, preserving subdirectories
         relative_path = os.path.relpath(src_file_path, img_path)
         dest_file_path = os.path.join(target_folder, relative_path)
+        
+        #print("DEBUG: Copying from", src_file_path, "to", dest_file_path)  # Debug line
         
         # (2) Make sure all subdirectories exist
         os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
