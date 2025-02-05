@@ -482,7 +482,8 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
         
         # ----------------------------------------------------------------------
         # (1) Construct the destination file path, preserving subdirectories
-        dest_file_path = os.path.join(target_folder, img_id)
+        relative_path = os.path.relpath(src_file_path, img_path)
+        dest_file_path = os.path.join(target_folder, relative_path)
         
         # (2) Make sure all subdirectories exist
         os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
