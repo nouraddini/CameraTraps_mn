@@ -87,48 +87,29 @@ def save_detection_images_dots(results, output_dir, input_dir = None, overwrite=
     
     with sv.ImageSink(target_dir_path=output_dir, overwrite=True) as sink: # TODO:Overwrite parameter is not used as in the original function
         if isinstance(results, list):
-            for i, entry in enumerate(results):
-                if "img_id" in entry:
-                    scene = np.array(Image.open(entry["img_id"]).convert("RGB"))
-                    image_name = os.path.basename(entry["img_id"])
-                else:
-                    scene = entry["img"]
-                    image_name = f"output_image_{i}.jpg" # default name if no image id is provided
-
+            for entry in results:
                 annotated_img = lab_annotator.annotate(
                     scene=dot_annotator.annotate(
-                        scene=scene,
+                        scene=np.array(Image.open(entry["img_id"]).convert("RGB")),
                         detections=entry["detections"],
                     ),
                     detections=entry["detections"],
                     labels=entry["labels"],
                 )
-                if input_dir:
-                    relative_path = os.path.relpath(entry["img_id"], input_dir)
-                    save_path = os.path.join(output_dir, relative_path)
-                    os.makedirs(os.path.dirname(save_path), exist_ok=True) 
-                    image_name = relative_path
                 sink.save_image(
                     image=cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR), image_name=entry["img_id"].rsplit(os.sep, 1)[1]
                 )
         else:
-            if "img_id" in results:
-                scene = np.array(Image.open(results["img_id"]).convert("RGB"))
-                image_name = os.path.basename(results["img_id"])
-            else:
-                scene = results["img"]
-                image_name = "output_image.jpg" # default name if no image id is provided
-            
             annotated_img = lab_annotator.annotate(
                 scene=dot_annotator.annotate(
-                    scene=scene,
+                    scene=np.array(Image.open(results["img_id"]).convert("RGB")),
                     detections=results["detections"],
                 ),
                 detections=results["detections"],
                 labels=results["labels"],
-            )   
+            )
             sink.save_image(
-                image=cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR), image_name=image_name
+                image=cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR), image_name=results["img_id"].rsplit(os.sep, 1)[1]
             )
 
 
@@ -489,27 +470,11 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
         else:
             target_folder = no_animal_path
         
-        # # Construct the source and destination file paths
-        # src_file_path = os.path.join(img_path, img_id)
-        # dest_file_path = os.path.join(target_folder, os.path.basename(img_id))
-        
-        # # Copy the file to the appropriate directory
-        # shutil.copy(src_file_path, dest_file_path)
-        
-        # Construct the source file path
+        # Construct the source and destination file paths
         src_file_path = os.path.join(img_path, img_id)
+        dest_file_path = os.path.join(target_folder, os.path.basename(img_id))
         
-        # ----------------------------------------------------------------------
-        # (1) Construct the destination file path, preserving subdirectories
-        relative_path = os.path.relpath(src_file_path, img_path)
-        dest_file_path = os.path.join(target_folder, relative_path)
-        
-        # (2) Make sure all subdirectories exist
-        os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
-        
-        # (3) Copy the file to the target folder (preserving structure)
+        # Copy the file to the appropriate directory
         shutil.copy(src_file_path, dest_file_path)
-        # ----------------------------------------------------------------------
-
 
     return "{} files were successfully separated".format(i)
