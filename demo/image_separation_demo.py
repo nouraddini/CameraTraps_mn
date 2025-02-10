@@ -39,7 +39,7 @@ if torch.cuda.is_available():
 #%% 
 # Initializing the MegaDetectorV6 model for image detection
 # Valid versions are MDV6-yolov9-c, MDV6-yolov9-e, MDV6-yolov10-c, MDV6-yolov10-e or MDV6-rtdetr-c
-detection_model = pw_detection.MegaDetectorV6(device=DEVICE, pretrained=True, version="MDV6-yolov10-e")
+detection_model = pw_detection.MegaDetectorV6(device=DEVICE, pretrained=True, version="MDV6-rtdetr-c")
 
 # Uncomment the following line to use MegaDetectorV5 instead of MegaDetectorV6
 #detection_model = pw_detection.MegaDetectorV5(device=DEVICE, pretrained=True, version="a")
@@ -48,7 +48,7 @@ detection_model = pw_detection.MegaDetectorV6(device=DEVICE, pretrained=True, ve
 """ Batch-detection demo """
 
 # Performing batch detection on the images
-results = detection_model.batch_image_detection(args.image_folder, batch_size=150) # batch_size=16
+results = detection_model.batch_image_detection(args.image_folder, batch_size=50) # batch_size=16 #V6 batch_size=150
 
 #%% Output to JSON results
 # Saving the detection results in JSON format
