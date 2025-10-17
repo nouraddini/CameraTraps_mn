@@ -515,12 +515,31 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
         else:
             target_folder = no_animal_path
         
-        # Construct the source and destination file paths
+        # # Construct the source and destination file paths
+        # src_file_path = os.path.join(img_path, img_id)
+        # dest_file_path = os.path.join(target_folder, os.path.basename(img_id))
+        
+        # # Copy the file to the appropriate directory
+        # shutil.copy(src_file_path, dest_file_path)
+        
+        # Construct the source file path
         src_file_path = os.path.join(img_path, img_id)
+<<<<<<< Updated upstream
         dest_file_path = os.path.join(target_folder, os.path.dirname(img_id))
         os.makedirs(dest_file_path, exist_ok=True)
+=======
+>>>>>>> Stashed changes
         
-        # Copy the file to the appropriate directory
+        # ----------------------------------------------------------------------
+        # (1) Construct the destination file path, preserving subdirectories
+        dest_file_path = os.path.join(target_folder, img_id)
+        
+        # (2) Make sure all subdirectories exist
+        os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
+        
+        # (3) Copy the file to the target folder (preserving structure)
         shutil.copy(src_file_path, dest_file_path)
+        # ----------------------------------------------------------------------
+
 
     return "{} files were successfully separated".format(i)
