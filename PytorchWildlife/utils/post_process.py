@@ -490,9 +490,16 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
         else:
             target_folder = no_animal_path
         
+<<<<<<< HEAD
         # # Construct the source and destination file paths
         # src_file_path = os.path.join(img_path, img_id)
         # dest_file_path = os.path.join(target_folder, os.path.basename(img_id))
+=======
+        # Construct the source and destination file paths
+        src_file_path = os.path.join(img_path, img_id)
+        dest_file_path = os.path.join(target_folder, os.path.dirname(img_id))
+        os.makedirs(dest_file_path, exist_ok=True)
+>>>>>>> d7cdfbaf (detection_folder_separation in post_process.py does not preserve nested directory structure #561 fixed)
         
         # # Copy the file to the appropriate directory
         # shutil.copy(src_file_path, dest_file_path)
