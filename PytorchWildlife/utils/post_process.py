@@ -542,14 +542,7 @@ def detection_folder_separation(
                 continue
             target_folder = no_animal_path
         
-        # # Construct the source and destination file paths
-        # src_file_path = os.path.join(img_path, img_id)
-        # dest_file_path = os.path.join(target_folder, os.path.basename(img_id))
-        
-        # # Copy the file to the appropriate directory
-        # shutil.copy(src_file_path, dest_file_path)
-        
-        # Construct the source file path
+        # Construct the source and destination file paths
         src_file_path = os.path.join(img_path, img_id)
 
         # OLD:
