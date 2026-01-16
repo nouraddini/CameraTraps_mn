@@ -453,7 +453,14 @@ def save_detection_classification_timelapse_json(
         json.dump(json_results, f, indent=4)
 
 
-def detection_folder_separation(json_file, img_path, destination_path, confidence_threshold):
+def detection_folder_separation(
+    json_file,
+    img_path,
+    destination_path,
+    confidence_threshold,
+    output_subdir=None,
+    copy_mode="both",
+    preserve_relative_paths=False):
     """
     Processes detection data from a JSON file to sort images into 'Animal' or 'No_animal' directories
     based on detection categories and confidence levels.
@@ -464,12 +471,16 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
     any category '0' detections above the threshold, including those with no detections at all, are 
     categorized under 'No_animal'.
 
-    Parameters:
-    - json_file (str): Path to the JSON file containing detection data.
-    - destination_path (str): Base path where 'Animal' and 'No_animal' folders will be created
-                              and into which images will be sorted and copied.
-    - source_images_directory (str): Path to the directory containing the source images to be processed.
-    - confidence_threshold (float): The confidence threshold to consider a detection as valid.
+        Parameters:
+        - json_file (str): Path to the JSON file containing detection data.
+        - img_path (str): Path to the directory containing the source images to be processed.
+        - destination_path (str): Base path where output folders will be created.
+        - confidence_threshold (float): The confidence threshold to consider a detection as valid.
+        - output_subdir (str, optional): If provided, outputs are written under
+            destination_path/output_subdir/Animal and destination_path/output_subdir/No_animal.
+                - copy_mode (str): Which files to copy: 'animal', 'no_animal', or 'both' (default).
+                - preserve_relative_paths (bool): If True, preserve the relative folder structure from
+                    `img_id` under each of the output folders (prevents filename collisions).
 
     Effects:
     - Reads from the specified `json_file`.
@@ -488,15 +499,27 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
     with open(json_file, 'r') as file:
         data = json.load(file)
     
+    if output_subdir:
+        destination_path = os.path.join(destination_path, output_subdir)
+
+    copy_mode = (copy_mode or "both").strip().lower()
+    if copy_mode not in {"animal", "no_animal", "both"}:
+        raise ValueError("copy_mode must be one of: 'animal', 'no_animal', 'both'")
+
+    preserve_relative_paths = bool(preserve_relative_paths)
+
     # Ensure the destination directories exist
     os.makedirs(destination_path, exist_ok=True)
     animal_path = os.path.join(destination_path, "Animal")
     no_animal_path = os.path.join(destination_path, "No_animal")
-    os.makedirs(animal_path, exist_ok=True)
-    os.makedirs(no_animal_path, exist_ok=True)
+    if copy_mode in {"animal", "both"}:
+        os.makedirs(animal_path, exist_ok=True)
+    if copy_mode in {"no_animal", "both"}:
+        os.makedirs(no_animal_path, exist_ok=True)
     
     # Process each image detection
     i = 0
+    n_copied = 0
     for item in data['annotations']:
         i+=1
         img_id = item['img_id']
@@ -511,8 +534,12 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
                 break
         
         if file_targeted_for_animal:
+            if copy_mode == "no_animal":
+                continue
             target_folder = animal_path
         else:
+            if copy_mode == "animal":
+                continue
             target_folder = no_animal_path
         
         # # Construct the source and destination file paths
@@ -524,22 +551,28 @@ def detection_folder_separation(json_file, img_path, destination_path, confidenc
         
         # Construct the source file path
         src_file_path = os.path.join(img_path, img_id)
-<<<<<<< Updated upstream
-        dest_file_path = os.path.join(target_folder, os.path.dirname(img_id))
-        os.makedirs(dest_file_path, exist_ok=True)
-=======
->>>>>>> Stashed changes
-        
-        # ----------------------------------------------------------------------
-        # (1) Construct the destination file path, preserving subdirectories
-        dest_file_path = os.path.join(target_folder, img_id)
-        
-        # (2) Make sure all subdirectories exist
-        os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
-        
-        # (3) Copy the file to the target folder (preserving structure)
+
+        # OLD:
+        # dest_file_path = os.path.join(target_folder, os.path.dirname(img_id))
+        # os.makedirs(dest_file_path, exist_ok=True)
+
+        if preserve_relative_paths:
+            rel_path = img_id
+            if os.path.isabs(rel_path):
+                rel_path = os.path.relpath(rel_path, start=img_path)
+            rel_path = os.path.normpath(rel_path)
+            if rel_path.startswith(".." + os.sep) or rel_path == "..":
+                rel_path = os.path.basename(img_id)
+
+            dest_file_path = os.path.join(target_folder, rel_path)
+            os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
+        else:
+            # Flatten structure and keep only basename of img_id
+            dest_file_path = os.path.join(target_folder, os.path.basename(img_id))
+            os.makedirs(target_folder, exist_ok=True)
+
+        # Copy the file to the appropriate directory
         shutil.copy(src_file_path, dest_file_path)
-        # ----------------------------------------------------------------------
+        n_copied += 1
 
-
-    return "{} files were successfully separated".format(i)
+    return "{} images processed, {} files copied".format(i, n_copied)
