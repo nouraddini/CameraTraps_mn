@@ -133,7 +133,7 @@ class YOLOV5Base(BaseDetector):
 
         return res
 
-    def batch_image_detection(self, data_path, batch_size: int = 16, det_conf_thres: float = 0.2, id_strip: str = None) -> list[dict]:
+    def batch_image_detection(self, data_path, batch_size: int = 16, det_conf_thres: float = 0.2, id_strip: str = None, show_paths: bool = False, path_log_every: int = 25, path_log_mode: str = "tqdm") -> list[dict]:
         """
         Perform detection on a batch of images.
 
@@ -142,6 +142,9 @@ class YOLOV5Base(BaseDetector):
             batch_size (int, optional): Batch size for inference. Defaults to 16.
             det_conf_thres (float, optional): Confidence threshold for predictions. Defaults to 0.2.
             id_strip (str, optional): Characters to strip from img_id. Defaults to None.
+            show_paths (bool, optional): If True, update the progress bar with the current image path.
+            path_log_every (int, optional): If show_paths is True, also print the current path every N images.
+            path_log_mode (str, optional): 'tqdm' (postfix) or 'line' (single-line overwrite).
 
         Returns:
             list[dict]: List of detection results for all images.
@@ -156,8 +159,22 @@ class YOLOV5Base(BaseDetector):
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, 
                             pin_memory=True, num_workers=0, drop_last=False)
 
+        import sys
+        import time
+
         results = []
-        with tqdm(total=len(loader)) as pbar:
+        total_imgs = len(dataset)
+        log_every = max(1, int(path_log_every))
+        mode = (path_log_mode or "tqdm").lower()
+        if mode == "inline":
+            mode = "line"
+
+        use_line = show_paths and mode == "line"
+        if use_line:
+            start_time = time.time()
+            done = 0
+            bar_len = 12
+
             for batch_index, (imgs, paths, sizes) in enumerate(loader):
                 imgs = imgs.to(self.device)
                 predictions = self.model(imgs)[0].detach().cpu()
@@ -165,11 +182,25 @@ class YOLOV5Base(BaseDetector):
 
                 batch_results = []
                 for i, pred in enumerate(predictions):
-                    if pred.size(0) == 0:  
+                    path = paths[i]
+                    done += 1
+                    if done % log_every == 0 or done == total_imgs:
+                        elapsed = time.time() - start_time
+                        rate = done / elapsed if elapsed > 0 else 0.0
+                        remaining = (total_imgs - done) / rate if rate > 0 else 0.0
+                        filled = int(bar_len * done / total_imgs) if total_imgs > 0 else 0
+                        bar = "█" * filled + " " * (bar_len - filled)
+                        pct = (done / total_imgs * 100) if total_imgs > 0 else 0
+                        sys.stdout.write(
+                            f"\rDetecting: {pct:3.0f}%|{bar}| {done}/{total_imgs} "
+                            f"[{elapsed:0.0f}s<{remaining:0.0f}s, {rate:.2f}img/s, {path}]"
+                        )
+                        sys.stdout.flush()
+
+                    if pred.size(0) == 0:
                         continue
                     pred = pred.numpy()
                     size = sizes[i].numpy()
-                    path = paths[i]
                     original_coords = pred[:, :4].copy()
                     # pred[:, :4] = scale_coords([self.IMAGE_SIZE] * 2, pred[:, :4], size).round()
                     pred[:, :4] = scale_boxes([self.IMAGE_SIZE] * 2, pred[:, :4], size).round()
@@ -178,6 +209,45 @@ class YOLOV5Base(BaseDetector):
                     res = self.results_generation(pred, path, id_strip)
                     res["normalized_coords"] = normalized_coords
                     batch_results.append(res)
-                pbar.update(1)
                 results.extend(batch_results)
+
+            sys.stdout.write("\n")
+            sys.stdout.flush()
             return results
+
+        bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
+        with tqdm(
+            total=total_imgs,
+            desc="Detecting",
+            unit="img",
+            dynamic_ncols=True,
+            mininterval=0.2,
+            smoothing=0.1,
+            bar_format=bar_format,
+        ) as pbar:
+            for batch_index, (imgs, paths, sizes) in enumerate(loader):
+                imgs = imgs.to(self.device)
+                predictions = self.model(imgs)[0].detach().cpu()
+                predictions = non_max_suppression(predictions, conf_thres=det_conf_thres)
+
+                batch_results = []
+                for i, pred in enumerate(predictions):
+                    path = paths[i]
+                    if show_paths and (pbar.n % log_every) == 0 and hasattr(pbar, "set_postfix_str"):
+                        pbar.set_postfix_str(str(path), refresh=True)
+                    if pred.size(0) == 0:
+                        pbar.update(1)
+                        continue
+                    pred = pred.numpy()
+                    size = sizes[i].numpy()
+                    original_coords = pred[:, :4].copy()
+                    # pred[:, :4] = scale_coords([self.IMAGE_SIZE] * 2, pred[:, :4], size).round()
+                    pred[:, :4] = scale_boxes([self.IMAGE_SIZE] * 2, pred[:, :4], size).round()
+                    # Normalize the coordinates for timelapse compatibility
+                    normalized_coords = [[x1 / size[1], y1 / size[0], x2 / size[1], y2 / size[0]] for x1, y1, x2, y2 in pred[:, :4]]
+                    res = self.results_generation(pred, path, id_strip)
+                    res["normalized_coords"] = normalized_coords
+                    batch_results.append(res)
+                    pbar.update(1)
+                results.extend(batch_results)
+        return results

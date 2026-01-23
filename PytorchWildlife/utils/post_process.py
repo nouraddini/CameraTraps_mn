@@ -555,13 +555,26 @@ def detection_folder_separation(
 
     iterable = annotations
     if _tqdm is not None:
-        iterable = _tqdm(annotations, total=len(annotations), desc="Separating (copy)", unit="img")
+        iterable = _tqdm(
+            annotations,
+            total=len(annotations),
+            desc="Separating (copy)",
+            unit="img",
+            dynamic_ncols=True,
+            mininterval=0.2,
+            smoothing=0.1,
+        )
 
     for item in iterable:
         i += 1
         img_id = item.get('img_id')
         if not img_id:
             continue
+        if _tqdm is not None:
+            if hasattr(iterable, "set_description_str"):
+                iterable.set_description_str(f"Copying: {img_id}", refresh=True)
+            elif hasattr(iterable, "set_postfix_str"):
+                iterable.set_postfix_str(str(img_id), refresh=True)
         categories = item.get('category', []) or []
         confidences = item.get('confidence', []) or []
         
