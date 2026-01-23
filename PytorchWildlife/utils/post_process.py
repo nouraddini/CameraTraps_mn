@@ -517,14 +517,53 @@ def detection_folder_separation(
     if copy_mode in {"no_animal", "both"}:
         os.makedirs(no_animal_path, exist_ok=True)
     
+    annotations = data.get('annotations', [])
+    if not isinstance(annotations, list):
+        raise ValueError("Invalid JSON: 'annotations' must be a list")
+
+    try:
+        from tqdm.auto import tqdm as _tqdm
+    except Exception:
+        _tqdm = None
+
+    def _resolve_existing_source_path(src_file_path: str):
+        if os.path.isfile(src_file_path):
+            return src_file_path
+
+        base, ext = os.path.splitext(src_file_path)
+        ext_u = ext.upper()
+
+        candidates = []
+        if ext_u == ".JP":
+            candidates.extend([base + ".JPG", base + ".JPEG", base + ".jpg", base + ".jpeg"])
+        elif ext_u == ".JPG":
+            candidates.extend([base + ".JPEG", base + ".jpg", base + ".jpeg"])
+        elif ext_u == ".JPEG":
+            candidates.extend([base + ".JPG", base + ".jpg", base + ".jpeg"])
+
+        for c in candidates:
+            if os.path.isfile(c):
+                return c
+        return None
+
     # Process each image detection
     i = 0
     n_copied = 0
-    for item in data['annotations']:
-        i+=1
-        img_id = item['img_id']
-        categories = item['category']
-        confidences = item['confidence']
+    n_missing = 0
+    n_samefile = 0
+    missing_examples = []
+
+    iterable = annotations
+    if _tqdm is not None:
+        iterable = _tqdm(annotations, total=len(annotations), desc="Separating (copy)", unit="img")
+
+    for item in iterable:
+        i += 1
+        img_id = item.get('img_id')
+        if not img_id:
+            continue
+        categories = item.get('category', []) or []
+        confidences = item.get('confidence', []) or []
         
         # Check if there is any category '0' with confidence above the threshold
         file_targeted_for_animal = False
@@ -564,8 +603,36 @@ def detection_folder_separation(
             dest_file_path = os.path.join(target_folder, os.path.basename(img_id))
             os.makedirs(target_folder, exist_ok=True)
 
-        # Copy the file to the appropriate directory
-        shutil.copy(src_file_path, dest_file_path)
-        n_copied += 1
+        resolved_src = _resolve_existing_source_path(src_file_path)
+        if resolved_src is None:
+            n_missing += 1
+            if len(missing_examples) < 10:
+                missing_examples.append(src_file_path)
+            continue
 
-    return "{} images processed, {} files copied".format(i, n_copied)
+        try:
+            if os.path.samefile(resolved_src, dest_file_path):
+                n_samefile += 1
+                continue
+        except FileNotFoundError:
+            pass
+
+        # Copy the file to the appropriate directory
+        try:
+            shutil.copy(resolved_src, dest_file_path)
+            n_copied += 1
+        except FileNotFoundError:
+            n_missing += 1
+            if len(missing_examples) < 10:
+                missing_examples.append(resolved_src)
+            continue
+
+    msg = "{} images processed, {} files copied".format(i, n_copied)
+    if n_missing:
+        msg += ", {} missing (skipped)".format(n_missing)
+    if n_samefile:
+        msg += ", {} same-file (skipped)".format(n_samefile)
+    if missing_examples:
+        msg += "\nMissing examples:\n  " + "\n  ".join(missing_examples)
+
+    return msg
