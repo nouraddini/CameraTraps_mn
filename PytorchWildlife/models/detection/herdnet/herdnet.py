@@ -196,7 +196,19 @@ class HerdNet(BaseDetector):
             results_dict = self.results_generation(preds_array, img=img)
         return results_dict
 
-    def batch_image_detection(self, data_path: str, det_conf_thres: float = 0.2, clf_conf_thres: float = 0.2, batch_size: int = 1, id_strip: str = None) -> list[dict]:
+    def batch_image_detection(
+        self,
+        data_path: str,
+        det_conf_thres: float = 0.2,
+        clf_conf_thres: float = 0.2,
+        batch_size: int = 1,
+        id_strip: str = None,
+        num_workers: int = 0,
+        prefetch_factor: int | None = None,
+        persistent_workers: bool = False,
+        pin_memory: bool = True,
+        decoder: str = "pil",
+    ) -> list[dict]:
         """
         Perform detection on a batch of images.
 
@@ -212,11 +224,21 @@ class HerdNet(BaseDetector):
         """
         dataset = pw_data.DetectionImageFolder(
             data_path,
-            transform=self.transforms
+            transform=self.transform,
+            decoder=decoder,
         )
         # Creating a Dataloader for batching and parallel processing of the images
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, 
-                            pin_memory=True, num_workers=0, drop_last=False) # TODO: discuss. why is num_workers 0?
+        use_workers = max(0, int(num_workers or 0))
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            pin_memory=bool(pin_memory),
+            num_workers=use_workers,
+            drop_last=False,
+            prefetch_factor=(prefetch_factor if use_workers > 0 else None),
+            persistent_workers=(bool(persistent_workers) if use_workers > 0 else False),
+        )
         
         results = []
 

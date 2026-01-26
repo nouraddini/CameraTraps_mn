@@ -39,6 +39,18 @@ def _log(msg: str, prefix: str | None = None) -> None:
     print(msg, flush=True)
 
 
+def _warm_cache(folder_path: str, bytes_to_read: int = 1024 * 1024) -> None:
+    exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
+    for root, _, files in os.walk(folder_path):
+        for f in files:
+            if os.path.splitext(f)[1].lower() in exts:
+                try:
+                    with open(os.path.join(root, f), "rb") as fh:
+                        fh.read(bytes_to_read)
+                except Exception:
+                    continue
+
+
 class _PathTracker:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -110,20 +122,39 @@ def process_folder_on_gpu(folder_path: str, gpu_id: int, cfg: dict[str, Any], qu
                 device=device, pretrained=True, version=cfg["model_version"]
             )
 
+        if cfg.get("warm_cache", False):
+            _log("Warming OS cache for folder", prefix=f"cuda:{gpu_id}")
+            _warm_cache(folder_path, int(cfg.get("warm_cache_bytes", 1048576)))
+
         folder_leaf = os.path.basename(os.path.normpath(folder_path))
         json_file = os.path.join(cfg["output_root"], f"detection_results__{folder_leaf}.json")
 
         if cfg["resume_skip"] and os.path.isfile(json_file):
-            queue.put({"status": "skipped_existing_json", "folder": folder_path, "json_file": json_file})
+            queue.put({
+                "status": "skipped_existing_json",
+                "folder": folder_path,
+                "json_file": json_file,
+                "gpu_id": gpu_id,
+            })
             return
 
         img_count = _count_images(folder_path)
         if cfg["skip_empty"] and img_count == 0:
-            queue.put({"status": "skipped_empty", "folder": folder_path, "images": 0})
+            queue.put({
+                "status": "skipped_empty",
+                "folder": folder_path,
+                "images": 0,
+                "gpu_id": gpu_id,
+            })
             return
 
         if cfg["dry_run"]:
-            queue.put({"status": "dry_run", "folder": folder_path, "images": img_count})
+            queue.put({
+                "status": "dry_run",
+                "folder": folder_path,
+                "images": img_count,
+                "gpu_id": gpu_id,
+            })
             return
 
         def _run_batch_detection_local(bs: int):
@@ -141,12 +172,22 @@ def process_folder_on_gpu(folder_path: str, gpu_id: int, cfg: dict[str, Any], qu
                             show_paths=True,
                             path_log_every=cfg["path_log_every"],
                             path_log_mode=cfg["path_log_mode"],
+                            num_workers=cfg.get("num_workers", 0),
+                            prefetch_factor=cfg.get("prefetch_factor"),
+                            persistent_workers=cfg.get("persistent_workers", False),
+                            pin_memory=cfg.get("pin_memory", True),
+                            decoder=cfg.get("decoder_backend", "pil"),
                         ), cur_bs
                     return detection_model_local.batch_image_detection(
                         folder_path,
                         batch_size=cur_bs,
                         det_conf_thres=cfg["det_conf_thres"],
                         id_strip=cfg["site_root"],
+                        num_workers=cfg.get("num_workers", 0),
+                        prefetch_factor=cfg.get("prefetch_factor"),
+                        persistent_workers=cfg.get("persistent_workers", False),
+                        pin_memory=cfg.get("pin_memory", True),
+                        decoder=cfg.get("decoder_backend", "pil"),
                     ), cur_bs
                 except Exception as exc:
                     if not (cfg["auto_batch_shrink"] and _is_oom(exc) and cur_bs > cfg["oom_retry_min_batch"]):
@@ -164,15 +205,18 @@ def process_folder_on_gpu(folder_path: str, gpu_id: int, cfg: dict[str, Any], qu
             exclude_category_ids=[],
             exclude_file_path=cfg["site_root"],
         )
-        sep_msg = pw_utils.detection_folder_separation(
-            json_file,
-            cfg["site_root"],
-            cfg["output_path"],
-            float(cfg["threshold"]),
-            output_subdir=cfg["site_name"],
-            copy_mode=cfg["copy_mode"],
-            preserve_relative_paths=True,
-        )
+        if cfg.get("defer_copy", False):
+            sep_msg = "Deferred copy: JSON saved; no file copying performed."
+        else:
+            sep_msg = pw_utils.detection_folder_separation(
+                json_file,
+                cfg["site_root"],
+                cfg["output_path"],
+                float(cfg["threshold"]),
+                output_subdir=cfg["site_name"],
+                copy_mode=cfg["copy_mode"],
+                preserve_relative_paths=True,
+            )
         dt = time.time() - t0
         queue.put({
             "status": "ok",

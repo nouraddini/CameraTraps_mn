@@ -155,7 +155,18 @@ class YOLOV8Base(BaseDetector):
         
         return res
 
-    def batch_image_detection(self, data_source, batch_size: int = 16, det_conf_thres: float = 0.2, id_strip: str = None) -> list[dict]:
+    def batch_image_detection(
+        self,
+        data_source,
+        batch_size: int = 16,
+        det_conf_thres: float = 0.2,
+        id_strip: str = None,
+        num_workers: int = 0,
+        prefetch_factor: int | None = None,
+        persistent_workers: bool = False,
+        pin_memory: bool = True,
+        decoder: str = "pil",
+    ) -> list[dict]:
         """
         Perform detection on a batch of images.
 
@@ -164,6 +175,11 @@ class YOLOV8Base(BaseDetector):
             batch_size (int, optional): Batch size for inference. Defaults to 16.
             det_conf_thres (float, optional): Confidence threshold for predictions. Defaults to 0.2.
             id_strip (str, optional): Characters to strip from img_id. Defaults to None.
+            num_workers (int, optional): DataLoader worker processes for decode.
+            prefetch_factor (int, optional): Prefetch batches per worker (requires num_workers > 0).
+            persistent_workers (bool, optional): Keep workers alive between batches.
+            pin_memory (bool, optional): Pin memory for faster H2D copies.
+            decoder (str, optional): 'pil', 'opencv', or 'torchvision'.
 
         Returns:
             list[dict]: List of detection results for all images.
@@ -196,12 +212,21 @@ class YOLOV8Base(BaseDetector):
         dataset = pw_data.DetectionImageFolder(
             data_source,
             transform=self.transform,
+            decoder=decoder,
         )
 
         # Creating a DataLoader for batching and parallel processing of the images
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, 
-                            pin_memory=True, num_workers=0, drop_last=False
-                            )
+        use_workers = max(0, int(num_workers or 0))
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            pin_memory=bool(pin_memory),
+            num_workers=use_workers,
+            drop_last=False,
+            prefetch_factor=(prefetch_factor if use_workers > 0 else None),
+            persistent_workers=(bool(persistent_workers) if use_workers > 0 else False),
+        )
         
         results = []
         with tqdm(total=len(loader)) as pbar:

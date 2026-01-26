@@ -116,7 +116,7 @@ class DetectionImageFolder(ImageFolder):
     the image's path, and the original size of the image.
     """
 
-    def __init__(self, image_dir, transform=None):
+    def __init__(self, image_dir, transform=None, decoder: str = "pil"):
         """
         Initializes the dataset.
 
@@ -125,6 +125,7 @@ class DetectionImageFolder(ImageFolder):
             transform (callable, optional): Optional transform to be applied on the image.
         """
         super(DetectionImageFolder, self).__init__(image_dir, transform)
+        self.decoder = (decoder or "pil").lower()
 
     def __getitem__(self, idx) -> tuple:
         """
@@ -140,8 +141,30 @@ class DetectionImageFolder(ImageFolder):
         img_path = self.images[idx]
 
         # Load and convert image to RGB
-        img = Image.open(img_path).convert("RGB")
-        img_size_ori = img.size[::-1]
+        img = None
+        if self.decoder == "opencv":
+            try:
+                import cv2
+                bgr = cv2.imread(img_path, cv2.IMREAD_COLOR)
+                if bgr is None:
+                    raise RuntimeError(f"cv2.imread failed for {img_path}")
+                img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            except Exception:
+                img = Image.open(img_path).convert("RGB")
+        elif self.decoder == "torchvision":
+            try:
+                from torchvision.io import read_image
+                t = read_image(img_path)  # CxHxW, uint8
+                img = t.permute(1, 2, 0).numpy()
+            except Exception:
+                img = Image.open(img_path).convert("RGB")
+        else:
+            img = Image.open(img_path).convert("RGB")
+
+        if isinstance(img, Image.Image):
+            img_size_ori = img.size[::-1]
+        else:
+            img_size_ori = (img.shape[0], img.shape[1])
         
         # Apply transformation if specified
         if self.transform:
