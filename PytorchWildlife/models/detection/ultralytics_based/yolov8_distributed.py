@@ -103,7 +103,16 @@ class YOLOV8_Distributed(BaseDetector):
         confidence = preds.boxes.conf.cpu().numpy()
         class_id = preds.boxes.cls.cpu().numpy().astype(int)
         
-        results = {"img_id": str(img_id).strip(id_strip)}
+        img_id = str(img_id)
+        if id_strip:
+            try:
+                img_id = os.path.relpath(img_id, start=id_strip)
+            except Exception:
+                prefix = id_strip + os.sep
+                if img_id.startswith(prefix):
+                    img_id = img_id[len(prefix):]
+
+        results = {"img_id": img_id}
         # results["detections"] = sv.Detections(
         #     xyxy=xyxy,
         #     confidence=confidence,

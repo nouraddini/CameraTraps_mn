@@ -145,7 +145,14 @@ class HerdNet(BaseDetector):
         """
         assert img is not None or img_id is not None, "Either img or img_id should be provided."
         if img_id is not None:
-            img_id = str(img_id).strip(id_strip) if id_strip else str(img_id)
+            img_id = str(img_id)
+            if id_strip:
+                try:
+                    img_id = os.path.relpath(img_id, start=id_strip)
+                except Exception:
+                    prefix = id_strip + os.sep
+                    if img_id.startswith(prefix):
+                        img_id = img_id[len(prefix):]
             results = {"img_id": img_id}
         elif img is not None:
             results = {"img": img}

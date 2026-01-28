@@ -5,6 +5,7 @@
 
 # Importing basic libraries
 
+import os
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
@@ -84,7 +85,16 @@ class YOLOV5Base(BaseDetector):
         Returns:
             dict: Dictionary containing image ID, detections, and labels.
         """
-        results = {"img_id": str(img_id).strip(id_strip)}
+        img_id = str(img_id)
+        if id_strip:
+            try:
+                img_id = os.path.relpath(img_id, start=id_strip)
+            except Exception:
+                prefix = id_strip + os.sep
+                if img_id.startswith(prefix):
+                    img_id = img_id[len(prefix):]
+
+        results = {"img_id": img_id}
         results["detections"] = sv.Detections(
             xyxy=preds[:, :4],
             confidence=preds[:, 4],
