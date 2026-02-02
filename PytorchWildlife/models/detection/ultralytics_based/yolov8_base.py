@@ -175,6 +175,7 @@ class YOLOV8Base(BaseDetector):
         persistent_workers: bool = False,
         pin_memory: bool = True,
         decoder: str = "pil",
+        corrupt_log_path: str | None = None,
     ) -> list[dict]:
         """
         Perform detection on a batch of images.
@@ -222,6 +223,7 @@ class YOLOV8Base(BaseDetector):
             data_source,
             transform=self.transform,
             decoder=decoder,
+            corrupt_log_path=corrupt_log_path,
         )
 
         # Creating a DataLoader for batching and parallel processing of the images
@@ -235,11 +237,16 @@ class YOLOV8Base(BaseDetector):
             drop_last=False,
             prefetch_factor=(prefetch_factor if use_workers > 0 else None),
             persistent_workers=(bool(persistent_workers) if use_workers > 0 else False),
+            collate_fn=pw_data.collate_skip_none,
         )
         
         results = []
         with tqdm(total=len(loader)) as pbar:
-            for batch_index, (imgs, paths, sizes) in enumerate(loader):
+            for batch_index, batch in enumerate(loader):
+                if batch is None:
+                    pbar.update(1)
+                    continue
+                imgs, paths, sizes = batch
                 det_results = self.predictor.stream_inference(paths)
                 batch_results = []
                 for idx, preds in enumerate(det_results):

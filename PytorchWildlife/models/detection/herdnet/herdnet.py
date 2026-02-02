@@ -215,6 +215,7 @@ class HerdNet(BaseDetector):
         persistent_workers: bool = False,
         pin_memory: bool = True,
         decoder: str = "pil",
+        corrupt_log_path: str | None = None,
     ) -> list[dict]:
         """
         Perform detection on a batch of images.
@@ -233,6 +234,7 @@ class HerdNet(BaseDetector):
             data_path,
             transform=self.transform,
             decoder=decoder,
+            corrupt_log_path=corrupt_log_path,
         )
         # Creating a Dataloader for batching and parallel processing of the images
         use_workers = max(0, int(num_workers or 0))
@@ -245,12 +247,17 @@ class HerdNet(BaseDetector):
             drop_last=False,
             prefetch_factor=(prefetch_factor if use_workers > 0 else None),
             persistent_workers=(bool(persistent_workers) if use_workers > 0 else False),
+            collate_fn=pw_data.collate_skip_none,
         )
         
         results = []
 
         with tqdm(total=len(loader)) as pbar:
-            for batch_index, (imgs, paths, sizes) in enumerate(loader):
+            for batch_index, batch in enumerate(loader):
+                if batch is None:
+                    pbar.update(1)
+                    continue
+                imgs, paths, sizes = batch
                 imgs = imgs.to(self.device)
                 predictions = self.stitcher(imgs[0]).detach().cpu()
                 heatmap, clsmap = predictions[:,:1,:,:], predictions[:,1:,:,:]

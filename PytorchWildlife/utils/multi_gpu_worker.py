@@ -71,6 +71,10 @@ class _PathTracker:
         with self._lock:
             return self._last_path
 
+    def reset(self) -> None:
+        with self._lock:
+            self._last_path = None
+
 
 class _TimestampedWriter:
     def __init__(self, stream):
@@ -177,6 +181,7 @@ def process_folder_on_gpu(folder_path: str, gpu_id: int, cfg: dict[str, Any], qu
                             persistent_workers=cfg.get("persistent_workers", False),
                             pin_memory=cfg.get("pin_memory", True),
                             decoder=cfg.get("decoder_backend", "pil"),
+                            corrupt_log_path=cfg.get("corrupt_log_path"),
                         ), cur_bs
                     return detection_model_local.batch_image_detection(
                         folder_path,
@@ -188,6 +193,7 @@ def process_folder_on_gpu(folder_path: str, gpu_id: int, cfg: dict[str, Any], qu
                         persistent_workers=cfg.get("persistent_workers", False),
                         pin_memory=cfg.get("pin_memory", True),
                         decoder=cfg.get("decoder_backend", "pil"),
+                        corrupt_log_path=cfg.get("corrupt_log_path"),
                     ), cur_bs
                 except Exception as exc:
                     if not (cfg["auto_batch_shrink"] and _is_oom(exc) and cur_bs > cfg["oom_retry_min_batch"]):
@@ -240,21 +246,52 @@ def worker_loop(gpu_id: int, task_queue, result_queue, cfg: dict[str, Any]) -> N
     """Worker loop that pulls folders from a queue and processes them on one GPU."""
     prefix = f"cuda:{gpu_id}"
     log_handle = None
+    current_log_path = None
     tracker = _PathTracker()
+    orig_stdout = sys.stdout
+    orig_stderr = sys.stderr
     stop_event = threading.Event()
     heartbeat_thread = None
     heartbeat_seconds = int(cfg.get("heartbeat_seconds", 0) or 0)
-    if cfg.get("capture_worker_stdout", False):
+    capture_stdout = cfg.get("capture_worker_stdout", False)
+    log_dir = None
+    if capture_stdout:
         log_dir = cfg.get("worker_log_dir") or os.path.join(cfg["output_root"], "logs")
         os.makedirs(log_dir, exist_ok=True)
+
+    def _sanitize_folder_leaf(name: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
+        return safe or "folder"
+
+    def _open_folder_log(folder_path: str) -> None:
+        nonlocal log_handle, current_log_path
+        if not capture_stdout or log_dir is None:
+            return
+        if log_handle is not None:
+            log_handle.flush()
+            log_handle.close()
+        folder_leaf = os.path.basename(os.path.normpath(folder_path))
+        safe_leaf = _sanitize_folder_leaf(folder_leaf)
         start_ts = time.strftime("%Y%m%d_%H%M%S")
-        log_path = os.path.join(log_dir, f"gpu{gpu_id}_pid{os.getpid()}_{start_ts}.log")
-        log_handle = open(log_path, "a", buffering=1, encoding="utf-8")
+        current_log_path = os.path.join(
+            log_dir,
+            f"gpu{gpu_id}_{safe_leaf}_pid{os.getpid()}_{start_ts}.log",
+        )
+        log_handle = open(current_log_path, "a", buffering=1, encoding="utf-8")
+        tracker.reset()
         sys.stdout = _TrackingWriter(log_handle, tracker)
         sys.stderr = _TrackingWriter(log_handle, tracker)
-        result_queue.put({"status": "worker_log", "gpu_id": gpu_id, "log_path": log_path})
+        result_queue.put({
+            "status": "worker_log",
+            "gpu_id": gpu_id,
+            "log_path": current_log_path,
+            "folder": folder_path,
+        })
         _log("Worker started", prefix=prefix)
-        _log(f"Config: model_family={cfg.get('model_family')} model_version={cfg.get('model_version')} ", prefix=prefix)
+        _log(
+            f"Config: model_family={cfg.get('model_family')} model_version={cfg.get('model_version')} ",
+            prefix=prefix,
+        )
         _log(
             "Config: batch_size={bs} det_conf_thres={conf} threshold={thr} copy_mode={cm} resume_skip={rs}"
             .format(
@@ -266,14 +303,16 @@ def worker_loop(gpu_id: int, task_queue, result_queue, cfg: dict[str, Any]) -> N
             ),
             prefix=prefix,
         )
-        if heartbeat_seconds > 0:
-            heartbeat_thread = threading.Thread(
-                target=_heartbeat_loop,
-                args=(stop_event, tracker, heartbeat_seconds, prefix),
-                daemon=True,
-            )
-            heartbeat_thread.start()
-    else:
+        _log(f"Processing folder: {folder_path}", prefix=prefix)
+
+    if heartbeat_seconds > 0:
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            args=(stop_event, tracker, heartbeat_seconds, prefix),
+            daemon=True,
+        )
+        heartbeat_thread.start()
+    if not capture_stdout:
         _log("Worker started", prefix=prefix)
 
     try:
@@ -281,6 +320,8 @@ def worker_loop(gpu_id: int, task_queue, result_queue, cfg: dict[str, Any]) -> N
             folder_path = task_queue.get()
             if folder_path is None:
                 break
+            if capture_stdout:
+                _open_folder_log(folder_path)
             process_folder_on_gpu(folder_path, gpu_id, cfg, result_queue)
     finally:
         stop_event.set()
@@ -289,3 +330,5 @@ def worker_loop(gpu_id: int, task_queue, result_queue, cfg: dict[str, Any]) -> N
         if log_handle is not None:
             log_handle.flush()
             log_handle.close()
+        sys.stdout = orig_stdout
+        sys.stderr = orig_stderr

@@ -2,12 +2,14 @@
 # Licensed under the MIT License.
 
 import os
+import time
 from glob import glob
-from PIL import Image, ImageFile
+from PIL import Image, ImageFile, UnidentifiedImageError
 import numpy as np
 import supervision as sv
 import torch
 from torch.utils.data import Dataset
+from torch.utils.data._utils.collate import default_collate
 
 # To handle truncated images during loading
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -15,6 +17,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Making the DetectionImageFolder class available for import from this module
 __all__ = [
     "DetectionImageFolder",
+    "collate_skip_none",
     ]
 
 # Define the allowed image extensions  
@@ -27,6 +30,14 @@ def has_file_allowed_extension(filename: str, extensions: tuple) -> bool:
 def is_image_file(filename: str) -> bool:  
     """Checks if a file is an allowed image extension."""  
     return has_file_allowed_extension(filename, IMG_EXTENSIONS) 
+
+
+def collate_skip_none(batch):
+    """Collate function that drops None samples (e.g., corrupt images)."""
+    batch = [b for b in batch if b is not None]
+    if not batch:
+        return None
+    return default_collate(batch)
 
 class ImageFolder(Dataset):
     """
@@ -116,7 +127,7 @@ class DetectionImageFolder(ImageFolder):
     the image's path, and the original size of the image.
     """
 
-    def __init__(self, image_dir, transform=None, decoder: str = "pil"):
+    def __init__(self, image_dir, transform=None, decoder: str = "pil", corrupt_log_path: str | None = None):
         """
         Initializes the dataset.
 
@@ -126,6 +137,20 @@ class DetectionImageFolder(ImageFolder):
         """
         super(DetectionImageFolder, self).__init__(image_dir, transform)
         self.decoder = (decoder or "pil").lower()
+        self.corrupt_log_path = corrupt_log_path
+
+    def _log_corrupt(self, img_path: str, exc: BaseException) -> None:
+        if not self.corrupt_log_path:
+            return
+        try:
+            log_dir = os.path.dirname(self.corrupt_log_path)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            with open(self.corrupt_log_path, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {img_path} | {type(exc).__name__}: {exc}\n")
+        except Exception:
+            pass
 
     def __getitem__(self, idx) -> tuple:
         """
@@ -142,24 +167,31 @@ class DetectionImageFolder(ImageFolder):
 
         # Load and convert image to RGB
         img = None
-        if self.decoder == "opencv":
-            try:
-                import cv2
-                bgr = cv2.imread(img_path, cv2.IMREAD_COLOR)
-                if bgr is None:
-                    raise RuntimeError(f"cv2.imread failed for {img_path}")
-                img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            except Exception:
+        try:
+            if self.decoder == "opencv":
+                try:
+                    import cv2
+                    bgr = cv2.imread(img_path, cv2.IMREAD_COLOR)
+                    if bgr is None:
+                        raise RuntimeError(f"cv2.imread failed for {img_path}")
+                    img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                except Exception:
+                    img = Image.open(img_path).convert("RGB")
+            elif self.decoder == "torchvision":
+                try:
+                    from torchvision.io import read_image
+                    t = read_image(img_path)  # CxHxW, uint8
+                    img = t.permute(1, 2, 0).numpy()
+                except Exception:
+                    img = Image.open(img_path).convert("RGB")
+            else:
                 img = Image.open(img_path).convert("RGB")
-        elif self.decoder == "torchvision":
-            try:
-                from torchvision.io import read_image
-                t = read_image(img_path)  # CxHxW, uint8
-                img = t.permute(1, 2, 0).numpy()
-            except Exception:
-                img = Image.open(img_path).convert("RGB")
-        else:
-            img = Image.open(img_path).convert("RGB")
+        except (UnidentifiedImageError, OSError, RuntimeError) as exc:
+            self._log_corrupt(img_path, exc)
+            return None
+        except Exception as exc:
+            self._log_corrupt(img_path, exc)
+            return None
 
         if isinstance(img, Image.Image):
             img_size_ori = img.size[::-1]

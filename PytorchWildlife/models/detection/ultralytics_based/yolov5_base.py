@@ -157,6 +157,7 @@ class YOLOV5Base(BaseDetector):
         persistent_workers: bool = False,
         pin_memory: bool = True,
         decoder: str = "pil",
+        corrupt_log_path: str | None = None,
     ) -> list[dict]:
         """
         Perform detection on a batch of images.
@@ -174,6 +175,7 @@ class YOLOV5Base(BaseDetector):
             persistent_workers (bool, optional): Keep workers alive between batches.
             pin_memory (bool, optional): Pin memory for faster H2D copies.
             decoder (str, optional): 'pil', 'opencv', or 'torchvision'.
+            corrupt_log_path (str, optional): Path to log corrupt images.
 
         Returns:
             list[dict]: List of detection results for all images.
@@ -183,6 +185,7 @@ class YOLOV5Base(BaseDetector):
             data_path,
             transform=self.transform,
             decoder=decoder,
+            corrupt_log_path=corrupt_log_path,
         )
 
         # Creating a DataLoader for batching and parallel processing of the images
@@ -196,6 +199,7 @@ class YOLOV5Base(BaseDetector):
             drop_last=False,
             prefetch_factor=(prefetch_factor if use_workers > 0 else None),
             persistent_workers=(bool(persistent_workers) if use_workers > 0 else False),
+            collate_fn=pw_data.collate_skip_none,
         )
 
         import sys
@@ -214,7 +218,10 @@ class YOLOV5Base(BaseDetector):
             done = 0
             bar_len = 12
 
-            for batch_index, (imgs, paths, sizes) in enumerate(loader):
+            for batch_index, batch in enumerate(loader):
+                if batch is None:
+                    continue
+                imgs, paths, sizes = batch
                 imgs = imgs.to(self.device)
                 predictions = self.model(imgs)[0].detach().cpu()
                 predictions = non_max_suppression(predictions, conf_thres=det_conf_thres)
@@ -264,7 +271,10 @@ class YOLOV5Base(BaseDetector):
             smoothing=0.1,
             bar_format=bar_format,
         ) as pbar:
-            for batch_index, (imgs, paths, sizes) in enumerate(loader):
+            for batch_index, batch in enumerate(loader):
+                if batch is None:
+                    continue
+                imgs, paths, sizes = batch
                 imgs = imgs.to(self.device)
                 predictions = self.model(imgs)[0].detach().cpu()
                 predictions = non_max_suppression(predictions, conf_thres=det_conf_thres)
